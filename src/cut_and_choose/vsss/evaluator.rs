@@ -167,6 +167,15 @@ where
         &self.finalized_indexes
     }
 
+	// This used only in the `btc-defi-bitvm-prototype` for non interactive protocol
+	// where regarbling verification is performed in a previous phase and the evaluator
+	// needs to be recreated later.
+	// This is a quick workaround that minimizes the changes in this repo (although the existence
+	// of this flag on the evaluator struct is questionable in the first place)
+    pub fn set_regarbled(&mut self, regarbled: bool) {
+        self.regarbled = regarbled;
+    }
+
     /// Run VSSS-specific regarbling verification.
     ///
     /// 1. Check that `OpenForInstance` matches the ones stored in `self.finalized_indexes`.
