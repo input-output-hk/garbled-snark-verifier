@@ -133,6 +133,7 @@ pub struct VsssCommit<GH: GateHasher, LH: LabelCommitHasher = DefaultLabelCommit
     pub garbling_table_commits: Vec<[u8; 32]>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OpenVsssInstance {
     pub index: usize,
     pub seed: Seed,
