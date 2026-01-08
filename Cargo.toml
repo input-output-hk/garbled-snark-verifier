@@ -17,8 +17,8 @@ description = "Garbled-circuit SNARK verifier using Groth16 (BN254), with reusab
 resolver = "2"
 
 [features]
-default = ["tracing_max_level", "tracing_scopes", "vsss", "sp1-soldering", "test-utils"]
-sp1-soldering = ["sp1-prover", "sp1-core-machine", "sp1-core-executor", "sp1-primitives", "sp1-stark", "dirs", "bincode"]
+default = ["tracing_max_level", "tracing_scopes", "vsss", "test-utils"]
+sp1-soldering = ["sp1-prover", "sp1-core-machine", "sp1-core-executor", "sp1-primitives", "sp1-stark", "sp1-build", "sp1-sdk", "dirs", "bincode"]
 test-utils = []
 vsss = ["ark-secp256k1"]
 
@@ -67,10 +67,8 @@ sp1-core-machine = { version = "5.2", optional = true }
 sp1-primitives = { version = "5.2", optional = true }
 sp1-prover = { version = "5.2", features = ["native-gnark"], optional = true }
 sp1-stark = { version = "5.2", optional = true }
-
-[build-dependencies]
-sp1-build = "5.2"
-sp1-sdk = "5.2"
+sp1-build = { version = "5.2", optional = true }
+sp1-sdk = { version = "5.2", optional = true }
 
 [dev-dependencies]
 ark-ec = "0.5.0"
@@ -83,10 +81,10 @@ serde_json = "1.0"
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
 
 # Install Git hooks via cargo-husky
-[dev-dependencies.cargo-husky]
-version = "1"
-default-features = false
-features = ["user-hooks"]
+# [dev-dependencies.cargo-husky]
+# version = "1"
+# default-features = false
+# features = ["user-hooks"]
 
 [profile.flamegraph]
 inherits = "release"
