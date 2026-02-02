@@ -9,16 +9,16 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     adaptor::{SignatureBytes, WideAdaptorInfo},
-    core::{PolynomialCommits, ShareCommits, lagrange_interpolate_whole_polynomial},
+    core::{lagrange_interpolate_whole_polynomial, PolynomialCommits, ShareCommits},
     garbler::InstanceWideLabelLookup,
-    types::{Canonical, transpose},
+    types::{transpose, Canonical},
     wide_garbling::GarbledWideLabelTable,
 };
 use crate::{
-    EvaluatedWire, S, WireId,
-    circuit::{CiphertextHandler, CircuitMode, EncodeInput, EvaluateMode, ciphertext_source},
+    circuit::{ciphertext_source, CiphertextHandler, CircuitMode, EncodeInput, EvaluateMode},
     cut_and_choose::{CommitPhaseOne, LabelCommitHasher, Seed},
     hashers::{DefaultLabelCommitHasher, GateHasher},
+    EvaluatedWire, WireId, S,
 };
 
 /// Messages emitted by the Garbler during Setup (spec Steps 1–4).
@@ -146,9 +146,10 @@ pub struct FinalizedVsssInstance {
     pub garbling_thread: JoinHandle<()>,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct EvaluatorAdaptorSigs {
     pub assert_index: usize,
-    pub secret: Fr,
+    pub secret: Canonical<Fr>,
     pub adaptor_sigs: Vec<WideAdaptorInfo>,
 }
 
@@ -161,8 +162,28 @@ impl EvaluatorAdaptorSigs {
     ) -> Self {
         // choose an index that is to be used for the assert
         let assert_index = finalized_indices[rng.gen_range(0..finalized_indices.len())];
+	   	Self::from_commits(rng, assert_index, garbler_commits, sighashes)
+    }
 
+	pub fn from_commits(
+        rng: &mut impl Rng,
+		assert_index: usize,
+        garbler_commits: &[ShareCommits<Canonical<Projective>>],
+        sighashes: &[Vec<u8>],
+    ) -> Self {
         let secret = Fr::rand(rng);
+        Self::with_secret(rng, assert_index, secret, garbler_commits, sighashes)
+    }
+
+    /// Create adaptor signatures with an explicit evaluator secret.
+    /// Use this when the secret must match a public key already embedded in a script.
+    pub fn with_secret(
+        rng: &mut impl Rng,
+        assert_index: usize,
+        secret: Fr,
+        garbler_commits: &[ShareCommits<Canonical<Projective>>],
+        sighashes: &[Vec<u8>],
+    ) -> Self {
         let adaptor_sigs = garbler_commits
             .chunks(256)
             .zip_eq(sighashes)
@@ -177,10 +198,11 @@ impl EvaluatorAdaptorSigs {
 
         Self {
             assert_index,
-            secret,
+            secret: Canonical(secret),
             adaptor_sigs,
         }
     }
+
 
     fn extract_wide_labels(&self, signatures: &[SignatureBytes]) -> Vec<Fr> {
         self.adaptor_sigs

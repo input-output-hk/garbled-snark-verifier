@@ -159,6 +159,23 @@ where
         }
     }
 
+    // Create a VSSS evaluator with pre-computed finalized indices.
+    //
+    // This is useful for non interactive protocols where finalized indices
+    // are derived deterministically from commitments by both parties before
+    // creating the evaluator.
+    pub fn create_with_indices(
+        rng: impl Rng,
+        config: Config<I>,
+        commits: VsssCommit<GH, LH>,
+        finalized_indices: Vec<usize>,
+    ) -> Self {
+        let mut evaluator = Self::create(rng, config, commits);
+		// just mutate
+        evaluator.finalized_indexes = finalized_indices.into_boxed_slice();
+        evaluator
+    }
+
     pub fn config(&self) -> &Config<I> {
         &self.config
     }
@@ -496,3 +513,5 @@ where
         })
     }
 }
+
+

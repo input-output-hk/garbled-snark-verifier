@@ -1,7 +1,10 @@
 use ark_ec::{AffineRepr, CurveGroup, PrimeGroup};
 use ark_ff::{BigInteger, PrimeField, UniformRand};
 use ark_secp256k1::{Fq, Fr, Projective};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+use super::types::Canonical;
 
 fn fq_to_be32(x: &Fq) -> [u8; 32] {
     // `Fq` modulus is 256 bits, so its big-endian encoding always fits in 32 bytes.
@@ -27,11 +30,11 @@ fn is_odd(y: &Fq) -> bool {
     y.into_bigint().is_odd()
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AdaptorInfo {
-    garbler_commit: Projective,
-    evaluator_nonce_commit: Projective,
-    evaluator_s: Fr,
+    garbler_commit: Canonical<Projective>,
+    evaluator_nonce_commit: Canonical<Projective>,
+    evaluator_s: Canonical<Fr>,
 }
 
 pub type SignatureBytes = [u8; 64];
@@ -71,9 +74,9 @@ impl AdaptorInfo {
         let s = nonce + e * evaluator_secret;
 
         Self {
-            evaluator_nonce_commit: nonce_commit,
-            garbler_commit,
-            evaluator_s: s,
+            evaluator_nonce_commit: Canonical(nonce_commit),
+            garbler_commit: Canonical(garbler_commit),
+            evaluator_s: Canonical(s),
         }
     }
 
@@ -81,7 +84,7 @@ impl AdaptorInfo {
         if garbler_sig.len() != 64 {
             return Err("invalid signature length".to_owned());
         }
-        let commit_sum = self.evaluator_nonce_commit + self.garbler_commit;
+        let commit_sum = self.evaluator_nonce_commit.0 + self.garbler_commit.0;
 
         let is_odd = is_odd(&commit_sum.into_affine().y);
 
@@ -92,18 +95,18 @@ impl AdaptorInfo {
         }
 
         let garbler_s = fr_from_be_bytes_mod_order(&garbler_sig[32..]);
-        let diff = garbler_s - self.evaluator_s;
+        let diff = garbler_s - self.evaluator_s.0;
         Ok(if is_odd { -diff } else { diff })
     }
 
     pub fn garbler_signature(&self, secret: &Fr) -> SignatureBytes {
-        let commit_sum = self.evaluator_nonce_commit + self.garbler_commit;
+        let commit_sum = self.evaluator_nonce_commit.0 + self.garbler_commit.0;
         let is_odd = is_odd(&commit_sum.into_affine().y);
 
         let (r, s) = if is_odd {
-            (-commit_sum, self.evaluator_s - secret)
+            (-commit_sum, self.evaluator_s.0 - secret)
         } else {
-            (commit_sum, self.evaluator_s + secret)
+            (commit_sum, self.evaluator_s.0 + secret)
         };
         let r_x = fq_to_be32(&r.into_affine().x);
         let s_bytes = fr_to_be32(&s);
@@ -115,7 +118,7 @@ impl AdaptorInfo {
 }
 
 /// Represents an adaptor where a valid signature can be produced by revealing any one of the garbler secrets.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct WideAdaptorInfo(Vec<AdaptorInfo>);
 
 impl WideAdaptorInfo {
@@ -136,7 +139,7 @@ impl WideAdaptorInfo {
         Ok(self
             .0
             .iter()
-            .find(|x| x.garbler_commit == commit)
+            .find(|x| x.garbler_commit.0 == commit)
             .ok_or("Secret does not correspond to any of the commits".to_owned())?
             .garbler_signature(secret))
     }
