@@ -288,6 +288,15 @@ impl<T: CanonicalSerialize + CanonicalDeserialize + Clone> PolynomialCommits<Can
     }
 }
 
+impl<T> PolynomialCommits<T> {
+    /// Commitment to the constant term `f(0)·G` — the point-0 reveal value, used as the adaptor
+    /// point `T` (`coefficient_commits[0]` in spec terms; equivalently the point-0 share commit,
+    /// since shares are the polynomial's values at points `0..`).
+    pub fn constant_commit(&self) -> &T {
+        &self.0.0[0]
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ShareCommits<T>(pub Vec<T>);
 
