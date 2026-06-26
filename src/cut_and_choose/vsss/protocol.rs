@@ -9,16 +9,16 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     adaptor::{SignatureBytes, WideAdaptorInfo},
-    core::{lagrange_interpolate_whole_polynomial, PolynomialCommits, ShareCommits},
+    core::{PolynomialCommits, ShareCommits, lagrange_interpolate_whole_polynomial},
     garbler::InstanceWideLabelLookup,
-    types::{transpose, Canonical},
+    types::{Canonical, transpose},
     wide_garbling::GarbledWideLabelTable,
 };
 use crate::{
-    circuit::{ciphertext_source, CiphertextHandler, CircuitMode, EncodeInput, EvaluateMode},
+    EvaluatedWire, S, WireId,
+    circuit::{CiphertextHandler, CircuitMode, EncodeInput, EvaluateMode, ciphertext_source},
     cut_and_choose::{CommitPhaseOne, LabelCommitHasher, Seed},
     hashers::{DefaultLabelCommitHasher, GateHasher},
-    EvaluatedWire, WireId, S,
 };
 
 /// Messages emitted by the Garbler during Setup (spec Steps 1–4).
@@ -162,12 +162,12 @@ impl EvaluatorAdaptorSigs {
     ) -> Self {
         // choose an index that is to be used for the assert
         let assert_index = finalized_indices[rng.gen_range(0..finalized_indices.len())];
-	   	Self::from_commits(rng, assert_index, garbler_commits, sighashes)
+        Self::from_commits(rng, assert_index, garbler_commits, sighashes)
     }
 
-	pub fn from_commits(
+    pub fn from_commits(
         rng: &mut impl Rng,
-		assert_index: usize,
+        assert_index: usize,
         garbler_commits: &[ShareCommits<Canonical<Projective>>],
         sighashes: &[Vec<u8>],
     ) -> Self {
@@ -203,6 +203,42 @@ impl EvaluatorAdaptorSigs {
         }
     }
 
+    /// Like [`Self::from_commits`] but locks each adaptor to the **point-0** reveal value
+    /// `coefficient_commits[0] = f(0)·G = T` instead of a finalized instance's share commit.
+    /// Used by the BABE adaptor-reveal variant (reveal at point 0). `assert_index` is set to 0
+    /// (no finalized instance is targeted; the reveal is the point-0 share).
+    pub fn from_coeff0(
+        rng: &mut impl Rng,
+        polynomial_commits: &[PolynomialCommits<Canonical<Projective>>],
+        sighashes: &[Vec<u8>],
+    ) -> Self {
+        let secret = Fr::rand(rng);
+        Self::with_secret_at_zero(rng, secret, polynomial_commits, sighashes)
+    }
+
+    /// As [`Self::from_coeff0`] with an explicit evaluator secret (to match a script-embedded
+    /// reveal pubkey).
+    pub fn with_secret_at_zero(
+        rng: &mut impl Rng,
+        secret: Fr,
+        polynomial_commits: &[PolynomialCommits<Canonical<Projective>>],
+        sighashes: &[Vec<u8>],
+    ) -> Self {
+        let adaptor_sigs = polynomial_commits
+            .chunks(256)
+            .zip_eq(sighashes)
+            .map(|(chunk, sighash)| {
+                let commits = chunk.iter().map(|pc| pc.constant_commit().0).collect_vec();
+                WideAdaptorInfo::new(&secret, &commits, sighash, rng)
+            })
+            .collect();
+
+        Self {
+            assert_index: 0,
+            secret: Canonical(secret),
+            adaptor_sigs,
+        }
+    }
 
     fn extract_wide_labels(&self, signatures: &[SignatureBytes]) -> Vec<Fr> {
         self.adaptor_sigs
@@ -289,5 +325,50 @@ impl EvaluatorAdaptorSigs {
                 (index, wires)
             })
             .collect_vec()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ark_ec::PrimeGroup;
+    use rand::thread_rng;
+
+    use super::*;
+    use crate::cut_and_choose::vsss::core::{Polynomial, Secp256k1};
+
+    #[test]
+    fn from_coeff0_locks_to_point_zero() {
+        let mut rng = thread_rng();
+        let secp = Secp256k1::new();
+        let degree = 3;
+
+        // Point-value representation: shares[0] = f(0) is the point-0 reveal value.
+        let poly = Polynomial::rand(&mut rng, degree);
+        let shares = poly.shares(degree + 1);
+        let f0 = shares[0].1;
+        let poly_commits = poly.coefficient_commits(&secp).to_canonical();
+
+        // `constant_commit()` is exactly g·f(0) = T (the adaptor point), not a finalized share.
+        assert_eq!(
+            poly_commits.constant_commit().0,
+            Projective::generator() * f0
+        );
+
+        let secret = Fr::rand(&mut rng);
+        let sighash = vec![7u8; 32];
+        let eas = EvaluatorAdaptorSigs::with_secret_at_zero(
+            &mut rng,
+            secret,
+            std::slice::from_ref(&poly_commits),
+            std::slice::from_ref(&sighash),
+        );
+        assert_eq!(eas.assert_index, 0);
+        assert_eq!(eas.adaptor_sigs.len(), 1);
+
+        // Completing with the point-0 share f(0) yields a signature that extracts back to f(0).
+        let sig = eas.adaptor_sigs[0]
+            .garbler_signature(&f0)
+            .expect("f0 matches the locked point-0 commit");
+        assert_eq!(eas.adaptor_sigs[0].extract_secret(&sig).unwrap(), f0);
     }
 }

@@ -115,6 +115,52 @@ impl AdaptorInfo {
         out[32..].copy_from_slice(&s_bytes);
         out
     }
+
+    /// The adaptor point `T = g·t` this pre-signature is locked under (the garbler's commitment).
+    pub fn adaptor_point(&self) -> Projective {
+        self.garbler_commit.0
+    }
+
+    /// Verify this is a well-formed adaptor pre-signature: completing it with the secret `t`
+    /// (where `g·t = adaptor_point()`) yields a valid BIP-340 signature under `reveal_pk` over
+    /// `message_hash`. Checks the adaptor relation without knowing `t`. `reveal_pk` must be the
+    /// evaluator's public point `g·evaluator_secret` (even-Y per BIP-340), i.e. the point implied
+    /// by the secret passed to [`Self::new`].
+    pub fn verify_presig(&self, reveal_pk: &Projective, message_hash: &[u8]) -> Result<(), String> {
+        let eval_pub = reveal_pk.into_affine();
+        let eval_pub_x = fq_to_be32(&eval_pub.x);
+
+        // R = nonce_commit + T (the same aggregate the completed signature carries; negation to
+        // even-Y preserves the x-coordinate, so R.x is parity-independent).
+        let commit_sum = self.evaluator_nonce_commit.0 + self.garbler_commit.0;
+        let commit_sum_aff = commit_sum.into_affine();
+        let r_x = fq_to_be32(&commit_sum_aff.x);
+        let odd = is_odd(&commit_sum_aff.y);
+
+        let tag_hash = Sha256::digest(b"BIP0340/challenge");
+        let mut hasher = Sha256::new();
+        hasher.update(tag_hash);
+        hasher.update(tag_hash);
+        hasher.update(r_x);
+        hasher.update(eval_pub_x);
+        hasher.update(message_hash);
+        let e = fr_from_be_bytes_mod_order(hasher.finalize().as_slice());
+
+        // Even-Y:  g·s == nonce_commit + e·pk ;  Odd-Y:  g·s == -nonce_commit + e·pk.
+        let lhs = Projective::generator() * self.evaluator_s.0;
+        let nonce_term = if odd {
+            -self.evaluator_nonce_commit.0
+        } else {
+            self.evaluator_nonce_commit.0
+        };
+        let rhs = nonce_term + *reveal_pk * e;
+
+        if lhs == rhs {
+            Ok(())
+        } else {
+            Err("adaptor pre-signature verification failed".to_owned())
+        }
+    }
 }
 
 /// Represents an adaptor where a valid signature can be produced by revealing any one of the garbler secrets.
@@ -148,6 +194,15 @@ impl WideAdaptorInfo {
             .iter()
             .find_map(|sig| sig.extract_secret(garbler_sig).ok())
             .ok_or("No valid garbler signature found".to_owned())
+    }
+
+    /// Verify every inner adaptor pre-signature against `reveal_pk` and `message_hash`
+    /// (see [`AdaptorInfo::verify_presig`]).
+    pub fn verify_presig(&self, reveal_pk: &Projective, message_hash: &[u8]) -> Result<(), String> {
+        for sig in &self.0 {
+            sig.verify_presig(reveal_pk, message_hash)?;
+        }
+        Ok(())
     }
 }
 
@@ -231,6 +286,34 @@ mod tests {
                 .expect("secret should be extracted");
             assert_eq!(extracted_secret, garbler_secret);
         }
+    }
+
+    #[test]
+    fn test_verify_presig() {
+        let mut rng = rand::thread_rng();
+        let evaluator_secret = Fr::rand(&mut rng);
+        let reveal_pk = Projective::generator() * evaluator_secret;
+        let garbler_secret = Fr::rand(&mut rng);
+        let adaptor_point = Projective::generator() * garbler_secret;
+        let msg = Sha256::digest(b"presig message").to_vec();
+
+        let adaptor = AdaptorInfo::new(&evaluator_secret, adaptor_point, &msg, &mut rng);
+
+        // A well-formed pre-signature verifies, and exposes the right adaptor point.
+        adaptor
+            .verify_presig(&reveal_pk, &msg)
+            .expect("presig should verify");
+        assert_eq!(adaptor.adaptor_point(), adaptor_point);
+
+        // Wrong message or wrong reveal key must be rejected.
+        let other_msg = Sha256::digest(b"different message").to_vec();
+        assert!(adaptor.verify_presig(&reveal_pk, &other_msg).is_err());
+        let wrong_pk = Projective::generator() * Fr::rand(&mut rng);
+        assert!(adaptor.verify_presig(&wrong_pk, &msg).is_err());
+
+        // And a verified pre-signature completes + extracts to the committed secret.
+        let sig = adaptor.garbler_signature(&garbler_secret);
+        assert_eq!(adaptor.extract_secret(&sig).unwrap(), garbler_secret);
     }
 }
 

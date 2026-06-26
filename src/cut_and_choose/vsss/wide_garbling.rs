@@ -19,6 +19,18 @@ impl GarbledWideLabelTable {
             .collect()
     }
 
+    /// Per-bit (width-1) tables: two value-labels per bit (one per polarity `β ∈ {0,1}`) and one
+    /// `bit_label` per bit, producing one 2-entry table per bit. Used by the BABE
+    /// `CheckLampAdaptorMatch` per-bit reveal, where each bit carries its own degree-`d` polynomial
+    /// rather than the 8-bit byte groups of [`Self::build_all`].
+    pub fn build_per_bit(bit_value_labels: &[Fr], bit_labels: &[GarbledWire]) -> Vec<Self> {
+        bit_value_labels
+            .chunks(2)
+            .zip(bit_labels.iter())
+            .map(|(vals, bit)| GarbledWideLabelTable::new(vals, std::slice::from_ref(bit)))
+            .collect()
+    }
+
     fn new(byte_labels: &[Fr], bit_labels: &[GarbledWire]) -> Self {
         assert_ne!(bit_labels.len(), 0);
         assert_ne!(byte_labels.len(), 0);
@@ -167,6 +179,35 @@ mod tests {
             }
 
             println!("table size: {}", table.0.iter().flatten().count());
+        }
+    }
+
+    #[test]
+    fn test_build_per_bit() {
+        let mut rng = thread_rng();
+        let delta = Delta::generate(&mut rng);
+        let num_bits = 5;
+
+        let bit_labels = (0..num_bits)
+            .map(|_| GarbledWire::random(&mut rng, &delta))
+            .collect_vec();
+        // two value-labels per bit (β = 0, 1)
+        let bit_value_labels = (0..num_bits * 2).map(|_| Fr::rand(&mut rng)).collect_vec();
+
+        let tables = GarbledWideLabelTable::build_per_bit(&bit_value_labels, &bit_labels);
+        assert_eq!(tables.len(), num_bits);
+
+        for (bit, table) in tables.iter().enumerate() {
+            for beta in 0..2usize {
+                let wires = table.lookup_evaluated_wires(&bit_value_labels[bit * 2 + beta]);
+                assert_eq!(wires.len(), 1);
+                let expected = if beta == 0 {
+                    EvaluatedWire::new(bit_labels[bit].label0, false)
+                } else {
+                    EvaluatedWire::new(bit_labels[bit].label1, true)
+                };
+                assert_eq!(wires[0], expected);
+            }
         }
     }
 }
