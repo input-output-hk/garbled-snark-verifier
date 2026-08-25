@@ -289,11 +289,27 @@ impl<T: CanonicalSerialize + CanonicalDeserialize + Clone> PolynomialCommits<Can
 }
 
 impl<T> PolynomialCommits<T> {
+    /// Commitments to the coefficients, lowest first.
+    pub fn from_points(points: Vec<T>) -> Self {
+        Self(Polynomial(points))
+    }
+
+    /// Coefficient commitments held, which is `degree + 1`.
+    pub fn len(&self) -> usize {
+        self.0.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.0.is_empty()
+    }
+
     /// Commitment to the constant term `f(0)·G` — the point-0 reveal value, used as the adaptor
     /// point `T` (`coefficient_commits[0]` in spec terms; equivalently the point-0 share commit,
     /// since shares are the polynomial's values at points `0..`).
-    pub fn constant_commit(&self) -> &T {
-        &self.0.0[0]
+    ///
+    /// `None` when no coefficient is held.
+    pub fn constant_commit(&self) -> Option<&T> {
+        self.0.0.first()
     }
 }
 
@@ -315,7 +331,14 @@ impl<T: CanonicalSerialize + CanonicalDeserialize + Clone> ShareCommits<Canonica
 impl ShareCommits<Projective> {
     pub fn verify(&self, polynomial_commits: &PolynomialCommits<Projective>) -> Result<(), String> {
         let n_known = polynomial_commits.0.0.len();
-        let n_unknown = self.0.len() - n_known;
+        if n_known == 0 {
+            return Err("No coefficient commits".to_owned());
+        }
+        let n_unknown = self
+            .0
+            .len()
+            .checked_sub(n_known)
+            .ok_or("More coefficient commits than share commits".to_owned())?;
         let unknown_points = polynomial_commits
             .0
             .eval_at_suffix_points::<true>(n_unknown);

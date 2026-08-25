@@ -228,7 +228,14 @@ impl EvaluatorAdaptorSigs {
             .chunks(256)
             .zip_eq(sighashes)
             .map(|(chunk, sighash)| {
-                let commits = chunk.iter().map(|pc| pc.constant_commit().0).collect_vec();
+                let commits = chunk
+                    .iter()
+                    .map(|pc| {
+                        pc.constant_commit()
+                            .expect("polynomial commits must carry a constant term")
+                            .0
+                    })
+                    .collect_vec();
                 WideAdaptorInfo::new(&secret, &commits, sighash, rng)
             })
             .collect();
@@ -350,7 +357,7 @@ mod tests {
 
         // `constant_commit()` is exactly g·f(0) = T (the adaptor point), not a finalized share.
         assert_eq!(
-            poly_commits.constant_commit().0,
+            poly_commits.constant_commit().unwrap().0,
             Projective::generator() * f0
         );
 
