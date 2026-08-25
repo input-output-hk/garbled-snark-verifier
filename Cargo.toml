@@ -120,9 +120,9 @@ required-features = ["sp1-soldering", "test-utils"]
 name = "gsv_vsss"
 required-features = ["vsss", "test-utils"]
 
-[[example]]
-name = "gsv_vsss_ni"
-required-features = ["vsss", "test-utils"]
+# [[example]]
+# name = "gsv_vsss_ni"
+# required-features = ["vsss", "test-utils"]
 
 
 [[example]]
