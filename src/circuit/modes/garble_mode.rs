@@ -79,7 +79,15 @@ pub struct GarbleMode<H: hashers::GateHasher, CTH: CiphertextHandler> {
 impl<H: hashers::GateHasher, CTH: CiphertextHandler> GarbleMode<H, CTH> {
     /// Create a new GarbleMode. The gate hasher is derived from the RNG seeded by `seed`.
     pub fn new(capacity: usize, seed: u64, output_handler: CTH) -> Self {
-        let mut rng = ChaChaRng::seed_from_u64(seed);
+        Self::from_rng(capacity, ChaChaRng::seed_from_u64(seed), output_handler)
+    }
+
+    /// Creates a GarbleMode from a full 256-bit seed.
+    pub fn from_seed(capacity: usize, seed: [u8; 32], output_handler: CTH) -> Self {
+        Self::from_rng(capacity, ChaChaRng::from_seed(seed), output_handler)
+    }
+
+    fn from_rng(capacity: usize, mut rng: ChaChaRng, output_handler: CTH) -> Self {
         let gate_hasher = H::from_rng(&mut rng);
         let delta = Delta::generate(&mut rng);
 
